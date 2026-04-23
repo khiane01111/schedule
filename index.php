@@ -15,22 +15,18 @@ $counts = [
     'schedules'  => (int)$db->query("SELECT COUNT(*) FROM schedules")->fetchColumn(),
 ];
 
-/* ── Additional rich stats ── */
 $fullTime   = (int)$db->query("SELECT COUNT(*) FROM professors WHERE employment_type='Full Time'")->fetchColumn();
 $partTime   = (int)$db->query("SELECT COUNT(*) FROM professors WHERE employment_type='Part Time'")->fetchColumn();
 $scheduled  = (int)$db->query("SELECT COUNT(DISTINCT professor_id) FROM schedules")->fetchColumn();
 $unscheduled = $counts['professors'] - $scheduled;
 
-/* Schedules by day */
 $byDay = [];
 $dayRows = $db->query("SELECT day_code, COUNT(*) as cnt FROM schedules GROUP BY day_code")->fetchAll();
 foreach ($dayRows as $d) $byDay[$d['day_code']] = (int)$d['cnt'];
 
-/* Schedules by semester */
 $sem1 = (int)$db->query("SELECT COUNT(*) FROM schedules WHERE semester='1st Semester'")->fetchColumn();
 $sem2 = (int)$db->query("SELECT COUNT(*) FROM schedules WHERE semester='2nd Semester'")->fetchColumn();
 
-/* Recent schedules */
 $recentSchedules = $db->query("
     SELECT sc.*, sec.name AS section_name, sub.code AS subject_code, sub.name AS subject_name,
            r.name AS room_name, r.room_type, p.name AS prof_name
@@ -42,14 +38,12 @@ $recentSchedules = $db->query("
     ORDER BY sc.id DESC LIMIT 8
 ")->fetchAll();
 
-/* Busiest rooms */
 $busyRooms = $db->query("
     SELECT r.name, r.room_type, COUNT(*) as cnt
     FROM schedules sc JOIN rooms r ON r.id=sc.room_id
     GROUP BY sc.room_id ORDER BY cnt DESC LIMIT 5
 ")->fetchAll();
 
-/* Top professors by schedule count */
 $topProfs = $db->query("
     SELECT p.name, p.employment_type, COUNT(*) as cnt
     FROM schedules sc JOIN professors p ON p.id=sc.professor_id
@@ -65,6 +59,22 @@ $maxDay    = !empty($byDay) ? max($byDay) : 1;
 <style>
 /* ── Dashboard base ──────────────────────────────── */
 .db { font-family:'Segoe UI',system-ui,sans-serif; }
+
+/* ── Live indicator ──────────────────────────────── */
+.db-live-badge {
+    display:inline-flex; align-items:center; gap:6px;
+    font-size:.7rem; font-weight:800; text-transform:uppercase;
+    letter-spacing:.6px; padding:4px 10px; border-radius:20px;
+    background:rgba(34,197,94,.15); color:#4ade80;
+    border:1px solid rgba(74,222,128,.2);
+    transition: background .3s;
+}
+.db-live-badge.flash { background:rgba(34,197,94,.35); }
+.db-live-dot {
+    width:6px; height:6px; border-radius:50%; background:#4ade80;
+    animation:pulse-green 2s infinite;
+}
+@keyframes pulse-green { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.6;transform:scale(1.3)} }
 
 /* ── Page header ─────────────────────────────────── */
 .db-hero {
@@ -97,7 +107,6 @@ $maxDay    = !empty($byDay) ? max($byDay) : 1;
     margin:0 0 6px; letter-spacing:-.5px; line-height:1.15;
 }
 .db-hero p { margin:0; color:#94a3b8; font-size:.9rem; }
-
 .db-hero-meta {
     position:relative; z-index:1;
     display:flex; flex-direction:column; align-items:flex-end; gap:6px;
@@ -108,15 +117,6 @@ $maxDay    = !empty($byDay) ? max($byDay) : 1;
     border-radius:8px; padding:6px 12px;
     display:flex; align-items:center; gap:6px;
 }
-.db-hero-badge {
-    font-size:.7rem; font-weight:800; text-transform:uppercase;
-    letter-spacing:.6px; padding:4px 10px; border-radius:20px;
-    background:rgba(34,197,94,.15); color:#4ade80;
-    border:1px solid rgba(74,222,128,.2);
-    display:flex; align-items:center; gap:5px;
-}
-.db-hero-badge::before { content:''; width:6px; height:6px; border-radius:50%; background:#4ade80; animation:pulse-green 2s infinite; }
-@keyframes pulse-green { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.6;transform:scale(1.3)} }
 
 /* ── Stat cards ──────────────────────────────────── */
 .db-stats {
@@ -142,7 +142,6 @@ $maxDay    = !empty($byDay) ? max($byDay) : 1;
 .db-stat.c-purple::before { background:linear-gradient(90deg,#8b5cf6,#a78bfa); }
 .db-stat.c-red::before    { background:linear-gradient(90deg,#ef4444,#f87171); }
 .db-stat.c-teal::before   { background:linear-gradient(90deg,#14b8a6,#2dd4bf); }
-
 .db-stat-ico {
     width:38px; height:38px; border-radius:10px;
     display:flex; align-items:center; justify-content:center;
@@ -154,12 +153,13 @@ $maxDay    = !empty($byDay) ? max($byDay) : 1;
 .c-purple .db-stat-ico { background:#faf5ff; }
 .c-red    .db-stat-ico { background:#fff1f2; }
 .c-teal   .db-stat-ico { background:#f0fdfa; }
-
 .db-stat-val {
     font-size:1.9rem; font-weight:900; line-height:1;
     letter-spacing:-.5px; margin-bottom:4px;
     color:var(--text,#0f172a);
+    transition: transform .2s;
 }
+.db-stat-val.bump { transform: scale(1.18); }
 .db-stat-label { font-size:.72rem; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:var(--text3,#94a3b8); }
 .db-stat-sub   { font-size:.75rem; color:var(--text3,#94a3b8); margin-top:3px; }
 
@@ -209,7 +209,7 @@ $maxDay    = !empty($byDay) ? max($byDay) : 1;
     height:100%; border-radius:8px;
     display:flex; align-items:center; padding-left:10px;
     font-size:.72rem; font-weight:800; color:#fff;
-    min-width:28px; transition:width .6s cubic-bezier(.16,1,.3,1);
+    min-width:0; transition:width .6s cubic-bezier(.16,1,.3,1);
     position:relative;
 }
 .day-bar-count {
@@ -294,8 +294,6 @@ $maxDay    = !empty($byDay) ? max($byDay) : 1;
 .db-table tbody tr { transition:background .1s; }
 .db-table tbody tr:hover { background:var(--hover,#f8fafc); }
 .db-table tbody tr:last-child td { border-bottom:none; }
-
-/* Cell pieces */
 .cell-section { font-weight:800; color:var(--text,#0f172a); font-size:.875rem; }
 .sub-chip {
     display:inline-block; background:#eff6ff; color:#1d4ed8;
@@ -310,10 +308,7 @@ $maxDay    = !empty($byDay) ? max($byDay) : 1;
 }
 .sem-pill.s1 { background:#eff6ff; color:#1e40af; border:1px solid #bfdbfe; }
 .sem-pill.s2 { background:#fff7ed; color:#c2410c; border:1px solid #fed7aa; }
-.day-pill {
-    display:inline-flex; align-items:center; gap:5px;
-    font-weight:800; font-size:.875rem;
-}
+.day-pill { display:inline-flex; align-items:center; gap:5px; font-weight:800; font-size:.875rem; }
 .day-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
 .time-mono {
     font-family:'DM Mono','Courier New',monospace;
@@ -329,11 +324,16 @@ $maxDay    = !empty($byDay) ? max($byDay) : 1;
     color:var(--text3,#94a3b8); padding:1px 6px; border-radius:4px; margin-left:4px;
 }
 .prof-name { font-size:.875rem; color:var(--text,#334155); }
-
-/* ── Empty state ─────────────────────────────────── */
 .db-empty { text-align:center; padding:48px 20px; color:var(--text3,#94a3b8); }
 .db-empty .ei { font-size:2.5rem; display:block; margin-bottom:10px; }
 .db-empty p { margin:0; font-size:.9rem; }
+
+/* ── New row flash animation ─────────────────────── */
+@keyframes rowFlash {
+    0%   { background: #dbeafe; }
+    100% { background: transparent; }
+}
+.row-new { animation: rowFlash 1.8s ease-out forwards; }
 
 /* ── Responsive ──────────────────────────────────── */
 @media(max-width:1200px){ .db-stats{grid-template-columns:repeat(3,1fr)} }
@@ -362,7 +362,10 @@ $maxDay    = !empty($byDay) ? max($byDay) : 1;
       <div class="db-hero-date">
         📅 <?= date('l, F j, Y') ?>
       </div>
-      <div class="db-hero-badge">System Active</div>
+      <div class="db-live-badge" id="live-badge">
+        <span class="db-live-dot"></span>
+        <span id="live-label">Live</span>
+      </div>
     </div>
   </div>
 
@@ -370,17 +373,17 @@ $maxDay    = !empty($byDay) ? max($byDay) : 1;
   <div class="db-stats">
     <?php
     $statDefs = [
-        ['icon'=>'🎓','label'=>'Courses',    'value'=>$counts['courses'],    'sub'=>'Academic programs', 'color'=>'c-blue'],
-        ['icon'=>'🏫','label'=>'Sections',   'value'=>$counts['sections'],   'sub'=>'Class groups',      'color'=>'c-green'],
-        ['icon'=>'📚','label'=>'Subjects',   'value'=>$counts['subjects'],   'sub'=>'Across all courses','color'=>'c-amber'],
-        ['icon'=>'👨‍🏫','label'=>'Professors', 'value'=>$counts['professors'], 'sub'=>'Faculty members',   'color'=>'c-purple'],
-        ['icon'=>'🚪','label'=>'Rooms',      'value'=>$counts['rooms'],      'sub'=>'Classrooms & labs', 'color'=>'c-red'],
-        ['icon'=>'📅','label'=>'Schedules',  'value'=>$counts['schedules'],  'sub'=>'Class sessions',    'color'=>'c-teal'],
+        ['icon'=>'🎓','label'=>'Courses',    'key'=>'courses',    'sub'=>'Academic programs', 'color'=>'c-blue'],
+        ['icon'=>'🏫','label'=>'Sections',   'key'=>'sections',   'sub'=>'Class groups',      'color'=>'c-green'],
+        ['icon'=>'📚','label'=>'Subjects',   'key'=>'subjects',   'sub'=>'Across all courses','color'=>'c-amber'],
+        ['icon'=>'👨‍🏫','label'=>'Professors', 'key'=>'professors', 'sub'=>'Faculty members',   'color'=>'c-purple'],
+        ['icon'=>'🚪','label'=>'Rooms',      'key'=>'rooms',      'sub'=>'Classrooms & labs', 'color'=>'c-red'],
+        ['icon'=>'📅','label'=>'Schedules',  'key'=>'schedules',  'sub'=>'Class sessions',    'color'=>'c-teal'],
     ];
     foreach ($statDefs as $s): ?>
     <div class="db-stat <?= $s['color'] ?>">
       <div class="db-stat-ico"><?= $s['icon'] ?></div>
-      <div class="db-stat-val"><?= number_format($s['value']) ?></div>
+      <div class="db-stat-val" id="stat-<?= $s['key'] ?>"><?= number_format($counts[$s['key']]) ?></div>
       <div class="db-stat-label"><?= $s['label'] ?></div>
       <div class="db-stat-sub"><?= $s['sub'] ?></div>
     </div>
@@ -398,21 +401,20 @@ $maxDay    = !empty($byDay) ? max($byDay) : 1;
           Schedules by Day
         </div>
       </div>
-      <div class="day-chart">
+      <div class="day-chart" id="day-chart">
         <?php foreach ($days as $code => $label):
           $cnt   = $byDay[$code] ?? 0;
           $pct   = $maxDay > 0 ? round(($cnt/$maxDay)*100) : 0;
           $color = $dayColors[$code] ?? '#64748b';
-          $bg    = $dayBgs[$code]    ?? '#f8fafc';
         ?>
-        <div class="day-bar-row">
+        <div class="day-bar-row" data-day="<?= $code ?>">
           <span class="day-bar-label" style="color:<?= $color ?>"><?= $label ?></span>
           <div class="day-bar-track">
-            <div class="day-bar-fill" style="width:<?= max($pct,0) ?>%;background:<?= $color ?>">
+            <div class="day-bar-fill" id="day-fill-<?= $code ?>" style="width:<?= max($pct,0) ?>%;background:<?= $color ?>">
               <?php if ($cnt > 0): ?><?= $cnt ?><?php endif; ?>
             </div>
           </div>
-          <span class="day-bar-count"><?= $cnt ?></span>
+          <span class="day-bar-count" id="day-count-<?= $code ?>"><?= $cnt ?></span>
         </div>
         <?php endforeach; ?>
       </div>
@@ -436,23 +438,21 @@ $maxDay    = !empty($byDay) ? max($byDay) : 1;
         ?>
         <div class="sem-donut-wrap">
           <div class="sem-donut">
-            <svg width="120" height="120" viewBox="0 0 120 120">
+            <svg width="120" height="120" viewBox="0 0 120 120" id="sem-svg">
               <circle cx="<?= $cx ?>" cy="<?= $cy ?>" r="<?= $r1 ?>" fill="none" stroke="#f1f5f9" stroke-width="14"/>
-              <?php if ($sem2 > 0): ?>
-              <circle cx="<?= $cx ?>" cy="<?= $cy ?>" r="<?= $r1 ?>" fill="none"
+              <circle id="sem-arc2" cx="<?= $cx ?>" cy="<?= $cy ?>" r="<?= $r1 ?>" fill="none"
                 stroke="#f59e0b" stroke-width="14"
                 stroke-dasharray="<?= round($dash2,2) ?> <?= round($circ,2) ?>"
-                stroke-dashoffset="0" stroke-linecap="round"/>
-              <?php endif; ?>
-              <?php if ($sem1 > 0): ?>
-              <circle cx="<?= $cx ?>" cy="<?= $cy ?>" r="<?= $r1 ?>" fill="none"
+                stroke-dashoffset="0" stroke-linecap="round"
+                style="<?= $sem2===0?'display:none':'' ?>"/>
+              <circle id="sem-arc1" cx="<?= $cx ?>" cy="<?= $cy ?>" r="<?= $r1 ?>" fill="none"
                 stroke="#3b82f6" stroke-width="14"
                 stroke-dasharray="<?= round($dash1,2) ?> <?= round($circ,2) ?>"
-                stroke-dashoffset="<?= round(-$dash2,2) ?>" stroke-linecap="round"/>
-              <?php endif; ?>
+                stroke-dashoffset="<?= round(-$dash2,2) ?>" stroke-linecap="round"
+                style="<?= $sem1===0?'display:none':'' ?>"/>
             </svg>
             <div class="sem-donut-label">
-              <span class="sem-donut-total"><?= $total ?></span>
+              <span class="sem-donut-total" id="sem-total"><?= $total ?></span>
               <span class="sem-donut-sub">Total</span>
             </div>
           </div>
@@ -461,14 +461,14 @@ $maxDay    = !empty($byDay) ? max($byDay) : 1;
           <div class="sem-legend-item">
             <span class="sem-legend-dot" style="background:#3b82f6"></span>
             <span class="sem-legend-name">1st Semester</span>
-            <span class="sem-legend-val"><?= $sem1 ?></span>
-            <span class="sem-legend-pct"><?= $total > 0 ? round($sem1/$total*100) : 0 ?>%</span>
+            <span class="sem-legend-val" id="sem1-val"><?= $sem1 ?></span>
+            <span class="sem-legend-pct" id="sem1-pct"><?= $total > 0 ? round($sem1/$total*100) : 0 ?>%</span>
           </div>
           <div class="sem-legend-item">
             <span class="sem-legend-dot" style="background:#f59e0b"></span>
             <span class="sem-legend-name">2nd Semester</span>
-            <span class="sem-legend-val"><?= $sem2 ?></span>
-            <span class="sem-legend-pct"><?= $total > 0 ? round($sem2/$total*100) : 0 ?>%</span>
+            <span class="sem-legend-val" id="sem2-val"><?= $sem2 ?></span>
+            <span class="sem-legend-pct" id="sem2-pct"><?= $total > 0 ? round($sem2/$total*100) : 0 ?>%</span>
           </div>
         </div>
       </div>
@@ -483,37 +483,36 @@ $maxDay    = !empty($byDay) ? max($byDay) : 1;
         </div>
       </div>
       <div class="prof-split">
-        <?php $total_p = $counts['professors'] ?: 1; ?>
         <div class="prof-type-row">
           <div class="prof-type-ico" style="background:#f0fdf4">🟢</div>
           <div class="prof-type-text">
             <div class="prof-type-label">Full Time</div>
             <div class="prof-type-track">
-              <div class="prof-type-fill" style="width:<?= round($fullTime/$total_p*100) ?>%;background:#10b981"></div>
+              <div class="prof-type-fill" id="ft-bar" style="width:<?= $counts['professors']>0?round($fullTime/$counts['professors']*100):0 ?>%;background:#10b981"></div>
             </div>
           </div>
-          <span class="prof-type-count"><?= $fullTime ?></span>
+          <span class="prof-type-count" id="ft-count"><?= $fullTime ?></span>
         </div>
         <div class="prof-type-row">
           <div class="prof-type-ico" style="background:#fff7ed">🟠</div>
           <div class="prof-type-text">
             <div class="prof-type-label">Part Time</div>
             <div class="prof-type-track">
-              <div class="prof-type-fill" style="width:<?= round($partTime/$total_p*100) ?>%;background:#f59e0b"></div>
+              <div class="prof-type-fill" id="pt-bar" style="width:<?= $counts['professors']>0?round($partTime/$counts['professors']*100):0 ?>%;background:#f59e0b"></div>
             </div>
           </div>
-          <span class="prof-type-count"><?= $partTime ?></span>
+          <span class="prof-type-count" id="pt-count"><?= $partTime ?></span>
         </div>
         <div class="prof-divider"></div>
         <div class="sched-ratio">
           <div class="sched-ratio-ico" style="background:#eff6ff">📅</div>
           <span class="sched-ratio-label">With Schedules</span>
-          <span class="sched-ratio-val"><?= $scheduled ?></span>
+          <span class="sched-ratio-val" id="sched-count"><?= $scheduled ?></span>
         </div>
         <div class="sched-ratio">
           <div class="sched-ratio-ico" style="background:#f8fafc">⭕</div>
           <span class="sched-ratio-label">Unassigned</span>
-          <span class="sched-ratio-val" style="color:<?= $unscheduled>0?'#ef4444':'#10b981' ?>"><?= $unscheduled ?></span>
+          <span class="sched-ratio-val" id="unsched-count" style="color:<?= $unscheduled>0?'#ef4444':'#10b981' ?>"><?= $unscheduled ?></span>
         </div>
       </div>
     </div>
@@ -532,27 +531,26 @@ $maxDay    = !empty($byDay) ? max($byDay) : 1;
         </div>
       </div>
       <?php if (empty($busyRooms)): ?>
-        <div class="db-empty"><span class="ei">🚪</span><p>No room data yet.</p></div>
-      <?php else:
-        $maxR = max(array_column($busyRooms,'cnt')) ?: 1;
-      ?>
-      <div class="rank-list">
-        <?php foreach ($busyRooms as $i => $rm): ?>
-        <div class="rank-item">
-          <span class="rank-num <?= ['top1','top2','top3'][$i] ?? '' ?>"><?= $i+1 ?></span>
-          <div class="rank-info">
-            <div class="rank-name"><?= h($rm['name']) ?></div>
-            <div class="rank-sub"><?= h($rm['room_type'] ?? '') ?></div>
-          </div>
-          <div class="rank-bar-wrap">
-            <div class="rank-bar-track">
-              <div class="rank-bar-fill" style="width:<?= round($rm['cnt']/$maxR*100) ?>%;background:#ef4444"></div>
+        <div class="db-empty" id="busy-rooms-empty"><span class="ei">🚪</span><p>No room data yet.</p></div>
+      <?php else: ?>
+        <div class="rank-list" id="busy-rooms-list">
+          <?php $maxR = max(array_column($busyRooms,'cnt')) ?: 1; ?>
+          <?php foreach ($busyRooms as $i => $rm): ?>
+          <div class="rank-item">
+            <span class="rank-num <?= ['top1','top2','top3'][$i] ?? '' ?>"><?= $i+1 ?></span>
+            <div class="rank-info">
+              <div class="rank-name"><?= h($rm['name']) ?></div>
+              <div class="rank-sub"><?= h($rm['room_type'] ?? '') ?></div>
             </div>
-            <div class="rank-count"><?= $rm['cnt'] ?> sessions</div>
+            <div class="rank-bar-wrap">
+              <div class="rank-bar-track">
+                <div class="rank-bar-fill" style="width:<?= round($rm['cnt']/$maxR*100) ?>%;background:#ef4444"></div>
+              </div>
+              <div class="rank-count"><?= $rm['cnt'] ?> sessions</div>
+            </div>
           </div>
+          <?php endforeach; ?>
         </div>
-        <?php endforeach; ?>
-      </div>
       <?php endif; ?>
     </div>
 
@@ -565,31 +563,29 @@ $maxDay    = !empty($byDay) ? max($byDay) : 1;
         </div>
       </div>
       <?php if (empty($topProfs)): ?>
-        <div class="db-empty"><span class="ei">👨‍🏫</span><p>No schedule data yet.</p></div>
-      <?php else:
-        $maxP = max(array_column($topProfs,'cnt')) ?: 1;
-      ?>
-      <div class="rank-list">
-        <?php foreach ($topProfs as $i => $prof):
-          $isFT = ($prof['employment_type'] ?? 'Full Time') === 'Full Time';
-        ?>
-        <div class="rank-item">
-          <span class="rank-num <?= ['top1','top2','top3'][$i] ?? '' ?>"><?= $i+1 ?></span>
-          <div class="rank-info">
-            <div class="rank-name"><?= h($prof['name']) ?></div>
-            <div class="rank-sub" style="color:<?= $isFT?'#10b981':'#f59e0b' ?>">
-              <?= $isFT ? '🟢 Full Time' : '🟠 Part Time' ?>
+        <div class="db-empty" id="top-profs-empty"><span class="ei">👨‍🏫</span><p>No schedule data yet.</p></div>
+      <?php else: ?>
+        <div class="rank-list" id="top-profs-list">
+          <?php $maxP = max(array_column($topProfs,'cnt')) ?: 1; ?>
+          <?php foreach ($topProfs as $i => $prof):
+            $isFT = ($prof['employment_type'] ?? 'Full Time') === 'Full Time'; ?>
+          <div class="rank-item">
+            <span class="rank-num <?= ['top1','top2','top3'][$i] ?? '' ?>"><?= $i+1 ?></span>
+            <div class="rank-info">
+              <div class="rank-name"><?= h($prof['name']) ?></div>
+              <div class="rank-sub" style="color:<?= $isFT?'#10b981':'#f59e0b' ?>">
+                <?= $isFT ? '🟢 Full Time' : '🟠 Part Time' ?>
+              </div>
+            </div>
+            <div class="rank-bar-wrap">
+              <div class="rank-bar-track">
+                <div class="rank-bar-fill" style="width:<?= round($prof['cnt']/$maxP*100) ?>%;background:#8b5cf6"></div>
+              </div>
+              <div class="rank-count"><?= $prof['cnt'] ?> sessions</div>
             </div>
           </div>
-          <div class="rank-bar-wrap">
-            <div class="rank-bar-track">
-              <div class="rank-bar-fill" style="width:<?= round($prof['cnt']/$maxP*100) ?>%;background:#8b5cf6"></div>
-            </div>
-            <div class="rank-count"><?= $prof['cnt'] ?> sessions</div>
-          </div>
+          <?php endforeach; ?>
         </div>
-        <?php endforeach; ?>
-      </div>
       <?php endif; ?>
     </div>
 
@@ -606,25 +602,20 @@ $maxDay    = !empty($byDay) ? max($byDay) : 1;
     </div>
 
     <?php if (empty($recentSchedules)): ?>
-      <div class="db-empty">
+      <div class="db-empty" id="recent-empty">
         <span class="ei">📅</span>
         <p>No schedules yet. <a href="schedules.php" style="color:#3b82f6;font-weight:700;text-decoration:none">Add one now →</a></p>
       </div>
     <?php else: ?>
       <div style="overflow-x:auto">
-        <table class="db-table">
+        <table class="db-table" id="recent-table">
           <thead>
             <tr>
-              <th>Section</th>
-              <th>Subject</th>
-              <th>Semester</th>
-              <th>Day</th>
-              <th>Time</th>
-              <th>Room</th>
-              <th>Instructor</th>
+              <th>Section</th><th>Subject</th><th>Semester</th>
+              <th>Day</th><th>Time</th><th>Room</th><th>Instructor</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody id="recent-tbody">
           <?php foreach ($recentSchedules as $r):
             $dc  = $r['day_code'];
             $clr = $dayColors[$dc] ?? '#64748b';
@@ -665,5 +656,241 @@ $maxDay    = !empty($byDay) ? max($byDay) : 1;
   </div>
 
 </div>
+
+<!-- ═══════════ REAL-TIME SSE UPDATE SCRIPT ═══════════ -->
+<script>
+(function() {
+  const DAY_COLORS = {M:'#3b82f6',T:'#10b981',W:'#6366f1',Th:'#f59e0b',F:'#ef4444',Sa:'#8b5cf6'};
+  const DAY_LABELS = {M:'Mon',T:'Tue',W:'Wed',Th:'Thu',F:'Fri',Sa:'Sat'};
+  const CIRC = 2 * Math.PI * 52;
+
+  // Bump animation on a counter element
+  function bump(el) {
+    el.classList.remove('bump');
+    void el.offsetWidth;
+    el.classList.add('bump');
+    setTimeout(() => el.classList.remove('bump'), 300);
+  }
+
+  // Flash the live badge briefly when data updates
+  function flashBadge() {
+    const b = document.getElementById('live-badge');
+    b.classList.add('flash');
+    setTimeout(() => b.classList.remove('flash'), 600);
+  }
+
+  // Update a single stat counter with animation if value changed
+  function updateStat(id, newVal) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const formatted = newVal.toLocaleString();
+    if (el.textContent !== formatted) {
+      el.textContent = formatted;
+      bump(el);
+    }
+  }
+
+  // Update day bars
+  function updateDayChart(byDay) {
+    const vals = Object.values(byDay);
+    const maxD = vals.length ? Math.max(...vals, 1) : 1;
+    for (const [code] of Object.entries(DAY_LABELS)) {
+      const cnt  = byDay[code] ?? 0;
+      const pct  = Math.round((cnt / maxD) * 100);
+      const fill = document.getElementById('day-fill-' + code);
+      const countEl = document.getElementById('day-count-' + code);
+      if (fill) {
+        fill.style.width = Math.max(pct, 0) + '%';
+        fill.textContent = cnt > 0 ? cnt : '';
+      }
+      if (countEl) countEl.textContent = cnt;
+    }
+  }
+
+  // Update semester donut
+  function updateSemester(sem1, sem2) {
+    const total = sem1 + sem2;
+    const dash1 = total > 0 ? (sem1 / total) * CIRC : 0;
+    const dash2 = total > 0 ? (sem2 / total) * CIRC : CIRC;
+
+    const arc1 = document.getElementById('sem-arc1');
+    const arc2 = document.getElementById('sem-arc2');
+    const tot  = document.getElementById('sem-total');
+    const v1   = document.getElementById('sem1-val');
+    const v2   = document.getElementById('sem2-val');
+    const p1   = document.getElementById('sem1-pct');
+    const p2   = document.getElementById('sem2-pct');
+
+    if (arc1) {
+      arc1.style.display = sem1 === 0 ? 'none' : '';
+      arc1.setAttribute('stroke-dasharray', dash1.toFixed(2) + ' ' + CIRC.toFixed(2));
+      arc1.setAttribute('stroke-dashoffset', (-dash2).toFixed(2));
+    }
+    if (arc2) {
+      arc2.style.display = sem2 === 0 ? 'none' : '';
+      arc2.setAttribute('stroke-dasharray', dash2.toFixed(2) + ' ' + CIRC.toFixed(2));
+    }
+    if (tot) tot.textContent = total;
+    if (v1)  v1.textContent  = sem1;
+    if (v2)  v2.textContent  = sem2;
+    if (p1)  p1.textContent  = total > 0 ? Math.round(sem1 / total * 100) + '%' : '0%';
+    if (p2)  p2.textContent  = total > 0 ? Math.round(sem2 / total * 100) + '%' : '0%';
+  }
+
+  // Update professor panel
+  function updateProfessors(d) {
+    const totalP = d.counts.professors || 1;
+    const unscheduled = d.counts.professors - d.scheduled;
+
+    const ftBar = document.getElementById('ft-bar');
+    const ptBar = document.getElementById('pt-bar');
+    if (ftBar) ftBar.style.width = Math.round(d.fullTime / totalP * 100) + '%';
+    if (ptBar) ptBar.style.width = Math.round(d.partTime / totalP * 100) + '%';
+
+    const ftC = document.getElementById('ft-count');
+    const ptC = document.getElementById('pt-count');
+    const sc  = document.getElementById('sched-count');
+    const uc  = document.getElementById('unsched-count');
+    if (ftC) ftC.textContent = d.fullTime;
+    if (ptC) ptC.textContent = d.partTime;
+    if (sc)  sc.textContent  = d.scheduled;
+    if (uc) {
+      uc.textContent = unscheduled;
+      uc.style.color = unscheduled > 0 ? '#ef4444' : '#10b981';
+    }
+  }
+
+  // Rebuild rank list (busiest rooms or top professors)
+  function rebuildRankList(containerId, items, barColor, subFn) {
+    const list = document.getElementById(containerId);
+    if (!list) return;
+    if (!items.length) { list.innerHTML = ''; return; }
+    const maxVal = Math.max(...items.map(i => i.cnt), 1);
+    const topClasses = ['top1','top2','top3'];
+    list.innerHTML = items.map((item, i) => `
+      <div class="rank-item">
+        <span class="rank-num ${topClasses[i] ?? ''}">${i + 1}</span>
+        <div class="rank-info">
+          <div class="rank-name">${escHtml(item.name)}</div>
+          <div class="rank-sub">${subFn(item)}</div>
+        </div>
+        <div class="rank-bar-wrap">
+          <div class="rank-bar-track">
+            <div class="rank-bar-fill" style="width:${Math.round(item.cnt/maxVal*100)}%;background:${barColor}"></div>
+          </div>
+          <div class="rank-count">${item.cnt} sessions</div>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  // Rebuild recent schedules tbody
+  function rebuildRecentTable(schedules, prevIds) {
+    const tbody = document.getElementById('recent-tbody');
+    if (!tbody) return;
+    tbody.innerHTML = schedules.map((r, idx) => {
+      const color = DAY_COLORS[r.day_code] ?? '#64748b';
+      const isNew = idx === 0 && prevIds.length && r.id !== prevIds[0];
+      const semClass = r.semester === '1st Semester' ? 's1' : 's2';
+      const semLabel = r.semester === '1st Semester' ? '1st Sem' : '2nd Sem';
+      return `<tr class="${isNew ? 'row-new' : ''}">
+        <td><span class="cell-section">${escHtml(r.section_name)}</span></td>
+        <td>
+          <span class="sub-chip">${escHtml(r.subject_code)}</span>
+          <div class="sub-name">${escHtml(r.subject_name)}</div>
+        </td>
+        <td><span class="sem-pill ${semClass}">${semLabel}</span></td>
+        <td>
+          <div class="day-pill">
+            <span class="day-dot" style="background:${color}"></span>
+            <span style="color:${color}">${dayFull(r.day_code)}</span>
+          </div>
+        </td>
+        <td><span class="time-mono">${formatTimeRange(r.start_time, r.end_time)}</span></td>
+        <td>
+          <span class="room-tag">${escHtml(r.room_name)}
+            ${r.room_type ? `<span class="room-type-badge">${escHtml(r.room_type)}</span>` : ''}
+          </span>
+        </td>
+        <td><span class="prof-name">${escHtml(r.prof_name)}</span></td>
+      </tr>`;
+    }).join('');
+  }
+
+  // Helpers
+  function escHtml(str) {
+    return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+  function dayFull(code) {
+    const map = {M:'Monday',T:'Tuesday',W:'Wednesday',Th:'Thursday',F:'Friday',Sa:'Saturday'};
+    return map[code] ?? code;
+  }
+  function formatTimeRange(s, e) {
+    function fmt(t) {
+      if (!t) return '';
+      const [h, m] = t.split(':').map(Number);
+      const ampm = h >= 12 ? 'PM' : 'AM';
+      return ((h % 12) || 12) + ':' + String(m).padStart(2,'0') + ' ' + ampm;
+    }
+    return fmt(s) + ' – ' + fmt(e);
+  }
+
+  // Track prev schedule IDs to detect new rows
+  let prevScheduleIds = [];
+
+  // ── Main SSE listener ──
+  function connect() {
+    const label = document.getElementById('live-label');
+    const badge = document.getElementById('live-badge');
+
+    const es = new EventSource('dashboard-stream.php');
+
+    es.onopen = () => {
+      if (label) label.textContent = 'Live';
+      if (badge) badge.style.borderColor = '';
+    };
+
+    es.onmessage = (e) => {
+      try {
+        const d = JSON.parse(e.data);
+        flashBadge();
+
+        // Stat counters
+        for (const key of ['courses','sections','subjects','professors','rooms','schedules']) {
+          updateStat('stat-' + key, d.counts[key]);
+        }
+
+        // Charts & panels
+        updateDayChart(d.byDay);
+        updateSemester(d.sem1, d.sem2);
+        updateProfessors(d);
+
+        // Rank lists
+        rebuildRankList('busy-rooms-list', d.busyRooms, '#ef4444', item => escHtml(item.room_type ?? ''));
+        rebuildRankList('top-profs-list', d.topProfs, '#8b5cf6', item => {
+          const ft = (item.employment_type ?? 'Full Time') === 'Full Time';
+          return `<span style="color:${ft?'#10b981':'#f59e0b'}">${ft ? '🟢 Full Time' : '🟠 Part Time'}</span>`;
+        });
+
+        // Recent schedules table
+        rebuildRecentTable(d.recentSchedules, prevScheduleIds);
+        prevScheduleIds = d.recentSchedules.map(r => r.id);
+
+      } catch (err) {
+        console.error('Dashboard SSE parse error:', err);
+      }
+    };
+
+    es.onerror = () => {
+      if (label) label.textContent = 'Reconnecting…';
+      es.close();
+      // Reconnect after 6 seconds
+      setTimeout(connect, 6000);
+    };
+  }
+
+  connect();
+})();
+</script>
 
 <?php require_once __DIR__ . '/includes/footer.php'; ?>
