@@ -50,6 +50,58 @@ $topProfs = $db->query("
     GROUP BY sc.professor_id ORDER BY cnt DESC LIMIT 5
 ")->fetchAll();
 
+// ── TODAY'S SCHEDULE ─────────────────────────────────────────────────────────
+// Map PHP day-of-week (0=Sun…6=Sat) to your day_code values
+$phpDow   = (int)date('w'); // 0=Sun,1=Mon,...,6=Sat
+$dowMap   = [0=>null, 1=>'M', 2=>'T', 3=>'W', 4=>'Th', 5=>'F', 6=>'Sa'];
+$todayCode = $dowMap[$phpDow] ?? null;
+
+$todaySchedules = [];
+if ($todayCode) {
+    $stmt = $db->prepare("
+        SELECT sc.*, sec.name AS section_name,
+               sub.code AS subject_code, sub.name AS subject_name,
+               r.name AS room_name, r.room_type,
+               p.name AS prof_name
+        FROM schedules sc
+        JOIN sections  sec ON sec.id = sc.section_id
+        JOIN subjects  sub ON sub.id = sc.subject_id
+        JOIN rooms     r   ON r.id   = sc.room_id
+        JOIN professors p  ON p.id   = sc.professor_id
+        WHERE sc.day_code = ?
+        ORDER BY sc.start_time ASC
+    ");
+    $stmt->execute([$todayCode]);
+    $todaySchedules = $stmt->fetchAll();
+}
+
+// Current Manila time as seconds-since-midnight for comparison
+$nowSec = (int)date('H') * 3600 + (int)date('i') * 60 + (int)date('s');
+
+function timeToSec(string $t): int {
+    [$h, $m] = explode(':', $t);
+    return (int)$h * 3600 + (int)$m * 60;
+}
+
+function classStatus(string $start, string $end, int $nowSec): string {
+    $s = timeToSec($start);
+    $e = timeToSec($end);
+    if ($nowSec >= $s && $nowSec < $e) return 'ongoing';
+    if ($nowSec < $s)                  return 'upcoming';
+    return 'done';
+}
+
+// Count rooms occupied right now (for the header badge)
+$roomsInUse = 0;
+$roomsDoneToday = 0;
+$roomsUpcoming  = 0;
+foreach ($todaySchedules as $r) {
+    $st = classStatus($r['start_time'], $r['end_time'], $nowSec);
+    if ($st === 'ongoing')  $roomsInUse++;
+    if ($st === 'done')     $roomsDoneToday++;
+    if ($st === 'upcoming') $roomsUpcoming++;
+}
+
 $dayColors = ['M'=>'#3b82f6','T'=>'#10b981','W'=>'#6366f1','Th'=>'#f59e0b','F'=>'#ef4444','Sa'=>'#8b5cf6'];
 $dayBgs    = ['M'=>'#eff6ff','T'=>'#f0fdf4','W'=>'#eef2ff','Th'=>'#fffbeb','F'=>'#fff1f2','Sa'=>'#faf5ff'];
 $days      = ['M'=>'Mon','T'=>'Tue','W'=>'Wed','Th'=>'Thu','F'=>'Fri','Sa'=>'Sat'];
@@ -192,6 +244,99 @@ $maxDay    = !empty($byDay) ? max($byDay) : 1;
     transition:background .15s;
 }
 .db-panel-link:hover { background:#dbeafe; }
+
+/* ══════════════════════════════════════════════════
+   TODAY'S SCHEDULE PANEL
+══════════════════════════════════════════════════ */
+.today-panel {
+    background:var(--card-bg,#fff);
+    border:1.5px solid var(--border,#e2e8f0);
+    border-radius:14px; overflow:hidden;
+    margin-bottom:24px;
+    position:relative;
+}
+.today-panel::before {
+    content:''; position:absolute; top:0; left:0; right:0; height:3px;
+    background:linear-gradient(90deg,#3b82f6,#6366f1,#8b5cf6);
+}
+.today-panel-hdr {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:16px 20px; border-bottom:1.5px solid var(--border,#e2e8f0);
+    flex-wrap:wrap; gap:10px;
+}
+.today-panel-title {
+    display:flex; align-items:center; gap:10px;
+    font-size:.95rem; font-weight:800; color:var(--text,#0f172a);
+}
+.today-day-badge {
+    padding:4px 12px; border-radius:20px;
+    font-size:.72rem; font-weight:900; text-transform:uppercase; letter-spacing:.6px;
+}
+.today-room-stats {
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+}
+.today-room-chip {
+    display:inline-flex; align-items:center; gap:5px;
+    font-size:.75rem; font-weight:700;
+    padding:4px 10px; border-radius:20px;
+}
+.chip-ongoing  { background:#dcfce7; color:#166534; border:1px solid #86efac; }
+.chip-upcoming { background:#fef9c3; color:#854d0e; border:1px solid #fde047; }
+.chip-done     { background:#f1f5f9; color:#475569; border:1px solid #cbd5e1; }
+.chip-dot      { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
+.chip-ongoing  .chip-dot { background:#16a34a; animation:pulse-green 2s infinite; }
+.chip-upcoming .chip-dot { background:#ca8a04; }
+.chip-done     .chip-dot { background:#94a3b8; }
+.today-no-school {
+    text-align:center; padding:48px 20px; color:var(--text3,#94a3b8);
+}
+.today-no-school .ei { font-size:2.5rem; display:block; margin-bottom:10px; }
+
+/* Today's table */
+.today-table { width:100%; border-collapse:collapse; }
+.today-table thead tr { background:var(--hover,#f8fafc); }
+.today-table th {
+    padding:9px 14px; font-size:.67rem; font-weight:800;
+    text-transform:uppercase; letter-spacing:.7px;
+    color:var(--text3,#94a3b8); text-align:left;
+    border-bottom:1.5px solid var(--border,#e2e8f0); white-space:nowrap;
+}
+.today-table td {
+    padding:11px 14px; font-size:.85rem;
+    border-bottom:1px solid var(--border,#f1f5f9);
+    color:var(--text,#334155); vertical-align:middle;
+}
+.today-table tbody tr { transition:background .1s; }
+.today-table tbody tr:hover { background:var(--hover,#f8fafc); }
+.today-table tbody tr:last-child td { border-bottom:none; }
+.today-table tbody tr.row-ongoing { background:#f0fdf4; }
+.today-table tbody tr.row-done    { opacity:.55; }
+
+/* Status badge */
+.status-badge {
+    display:inline-flex; align-items:center; gap:5px;
+    font-size:.7rem; font-weight:800; text-transform:uppercase;
+    letter-spacing:.4px; padding:3px 9px; border-radius:20px; white-space:nowrap;
+}
+.st-ongoing  { background:#dcfce7; color:#166534; border:1px solid #86efac; }
+.st-upcoming { background:#fef9c3; color:#854d0e; border:1px solid #fde047; }
+.st-done     { background:#f1f5f9; color:#64748b; border:1px solid #cbd5e1; }
+.st-ongoing .chip-dot  { width:6px; height:6px; border-radius:50%; background:#16a34a; animation:pulse-green 2s infinite; flex-shrink:0; }
+.st-upcoming .chip-dot { width:6px; height:6px; border-radius:50%; background:#ca8a04; flex-shrink:0; }
+.st-done .chip-dot     { width:6px; height:6px; border-radius:50%; background:#94a3b8; flex-shrink:0; }
+
+/* Room occupancy pill */
+.room-occ {
+    display:inline-flex; align-items:center; gap:5px;
+    font-size:.8rem; font-weight:700;
+}
+.room-occ-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+.room-occ.occupied .room-occ-dot { background:#16a34a; animation:pulse-green 2s infinite; }
+.room-occ.free     .room-occ-dot { background:#94a3b8; }
+
+/* Progress bar for time remaining */
+.time-progress { margin-top:3px; height:3px; border-radius:3px; background:#e2e8f0; overflow:hidden; width:80px; }
+.time-progress-fill { height:100%; border-radius:3px; background:#10b981; transition:width 1s linear; }
 
 /* ── Day schedule chart ──────────────────────────── */
 .day-chart { padding:20px; display:flex; flex-direction:column; gap:10px; }
@@ -343,6 +488,8 @@ $maxDay    = !empty($byDay) ? max($byDay) : 1;
     .db-grid-2,.db-grid-3{grid-template-columns:1fr}
     .db-hero{padding:22px 20px}
     .db-hero h2{font-size:1.3rem}
+    .today-table th:nth-child(4),
+    .today-table td:nth-child(4) { display:none; }
 }
 </style>
 
@@ -390,6 +537,130 @@ $maxDay    = !empty($byDay) ? max($byDay) : 1;
     <?php endforeach; ?>
   </div>
 
+  <!-- ═══════════ TODAY'S SCHEDULE PANEL ═══════════ -->
+  <div class="today-panel" id="today-panel">
+    <div class="today-panel-hdr">
+      <div class="today-panel-title">
+        <div class="db-panel-title-icon" style="background:#eff6ff">📋</div>
+        Today's Classes
+        <?php if ($todayCode):
+          $tc = $dayColors[$todayCode] ?? '#64748b';
+          $tb = $dayBgs[$todayCode]    ?? '#f1f5f9'; ?>
+          <span class="today-day-badge" style="background:<?= $tb ?>;color:<?= $tc ?>;border:1px solid <?= $tc ?>30">
+            <?= $days[$todayCode] ?? $todayCode ?> — <?= date('M j') ?>
+          </span>
+        <?php else: ?>
+          <span class="today-day-badge" style="background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0">
+            No School Day
+          </span>
+        <?php endif; ?>
+      </div>
+      <div class="today-room-stats" id="today-room-stats">
+        <?php if ($todayCode && count($todaySchedules)): ?>
+          <span class="today-room-chip chip-ongoing" id="chip-ongoing">
+            <span class="chip-dot"></span>
+            <span id="chip-ongoing-cnt"><?= $roomsInUse ?></span> Ongoing
+          </span>
+          <span class="today-room-chip chip-upcoming" id="chip-upcoming">
+            <span class="chip-dot"></span>
+            <span id="chip-upcoming-cnt"><?= $roomsUpcoming ?></span> Upcoming
+          </span>
+          <span class="today-room-chip chip-done" id="chip-done">
+            <span class="chip-dot"></span>
+            <span id="chip-done-cnt"><?= $roomsDoneToday ?></span> Done
+          </span>
+        <?php endif; ?>
+      </div>
+    </div>
+
+    <?php if (!$todayCode): ?>
+      <div class="today-no-school">
+        <span class="ei">🌴</span>
+        <p>Today is Sunday — no classes scheduled.</p>
+      </div>
+
+    <?php elseif (empty($todaySchedules)): ?>
+      <div class="today-no-school" id="today-empty">
+        <span class="ei">📭</span>
+        <p>No classes scheduled for <?= $days[$todayCode] ?>.</p>
+      </div>
+
+    <?php else: ?>
+      <div style="overflow-x:auto">
+        <table class="today-table" id="today-table">
+          <thead>
+            <tr>
+              <th>Status</th>
+              <th>Section</th>
+              <th>Subject</th>
+              <th>Time</th>
+              <th>Room</th>
+              <th>Instructor</th>
+              <th>Semester</th>
+            </tr>
+          </thead>
+          <tbody id="today-tbody">
+          <?php foreach ($todaySchedules as $r):
+            $st   = classStatus($r['start_time'], $r['end_time'], $nowSec);
+            $rowCls = match($st) { 'ongoing'=>'row-ongoing', 'done'=>'row-done', default=>'' };
+            // Progress % for ongoing classes
+            $prog = 0;
+            if ($st === 'ongoing') {
+                $dur  = timeToSec($r['end_time']) - timeToSec($r['start_time']);
+                $elapsed = $nowSec - timeToSec($r['start_time']);
+                $prog = $dur > 0 ? min(100, round($elapsed/$dur*100)) : 0;
+            }
+          ?>
+          <tr class="<?= $rowCls ?>" data-start="<?= h($r['start_time']) ?>" data-end="<?= h($r['end_time']) ?>">
+            <td>
+              <?php if ($st === 'ongoing'): ?>
+                <span class="status-badge st-ongoing">
+                  <span class="chip-dot"></span> Ongoing
+                </span>
+                <div class="time-progress">
+                  <div class="time-progress-fill" style="width:<?= $prog ?>%"></div>
+                </div>
+              <?php elseif ($st === 'upcoming'): ?>
+                <span class="status-badge st-upcoming">
+                  <span class="chip-dot"></span> Upcoming
+                </span>
+              <?php else: ?>
+                <span class="status-badge st-done">
+                  <span class="chip-dot"></span> Done
+                </span>
+              <?php endif; ?>
+            </td>
+            <td><span class="cell-section"><?= h($r['section_name']) ?></span></td>
+            <td>
+              <span class="sub-chip"><?= h($r['subject_code']) ?></span>
+              <div class="sub-name"><?= h($r['subject_name']) ?></div>
+            </td>
+            <td>
+              <span class="time-mono"><?= formatTimeRange($r['start_time'], $r['end_time']) ?></span>
+            </td>
+            <td>
+              <div class="room-occ <?= $st === 'ongoing' ? 'occupied' : 'free' ?>">
+                <span class="room-occ-dot"></span>
+                <?= h($r['room_name']) ?>
+              </div>
+              <?php if ($r['room_type']): ?>
+                <div style="font-size:.7rem;color:var(--text3,#94a3b8);margin-top:2px"><?= h($r['room_type']) ?></div>
+              <?php endif; ?>
+            </td>
+            <td><span class="prof-name"><?= h($r['prof_name']) ?></span></td>
+            <td>
+              <span class="sem-pill <?= $r['semester']==='1st Semester'?'s1':'s2' ?>">
+                <?= $r['semester']==='1st Semester'?'1st Sem':'2nd Sem' ?>
+              </span>
+            </td>
+          </tr>
+          <?php endforeach; ?>
+          </tbody>
+        </table>
+      </div>
+    <?php endif; ?>
+  </div>
+
   <!-- ═══════════ ROW 2: Day chart + Semester donut + Professor split ═══════════ -->
   <div class="db-grid-3">
 
@@ -406,10 +677,11 @@ $maxDay    = !empty($byDay) ? max($byDay) : 1;
           $cnt   = $byDay[$code] ?? 0;
           $pct   = $maxDay > 0 ? round(($cnt/$maxDay)*100) : 0;
           $color = $dayColors[$code] ?? '#64748b';
+          $isToday = ($code === $todayCode);
         ?>
         <div class="day-bar-row" data-day="<?= $code ?>">
-          <span class="day-bar-label" style="color:<?= $color ?>"><?= $label ?></span>
-          <div class="day-bar-track">
+          <span class="day-bar-label" style="color:<?= $color ?>;<?= $isToday?'font-weight:900':'' ?>"><?= $label ?></span>
+          <div class="day-bar-track" style="<?= $isToday?'box-shadow:0 0 0 2px '.$color.'40':'' ?>">
             <div class="day-bar-fill" id="day-fill-<?= $code ?>" style="width:<?= max($pct,0) ?>%;background:<?= $color ?>">
               <?php if ($cnt > 0): ?><?= $cnt ?><?php endif; ?>
             </div>
@@ -657,40 +929,114 @@ $maxDay    = !empty($byDay) ? max($byDay) : 1;
 
 </div>
 
-<!-- ═══════════ REAL-TIME SSE UPDATE SCRIPT ═══════════ -->
+<!-- ═══════════ SCRIPTS ═══════════ -->
 <script>
 (function() {
   const DAY_COLORS = {M:'#3b82f6',T:'#10b981',W:'#6366f1',Th:'#f59e0b',F:'#ef4444',Sa:'#8b5cf6'};
   const DAY_LABELS = {M:'Mon',T:'Tue',W:'Wed',Th:'Thu',F:'Fri',Sa:'Sat'};
   const CIRC = 2 * Math.PI * 52;
 
-  // Bump animation on a counter element
+  // ── Helpers ───────────────────────────────────────
   function bump(el) {
     el.classList.remove('bump');
     void el.offsetWidth;
     el.classList.add('bump');
     setTimeout(() => el.classList.remove('bump'), 300);
   }
-
-  // Flash the live badge briefly when data updates
   function flashBadge() {
     const b = document.getElementById('live-badge');
     b.classList.add('flash');
     setTimeout(() => b.classList.remove('flash'), 600);
   }
-
-  // Update a single stat counter with animation if value changed
   function updateStat(id, newVal) {
     const el = document.getElementById(id);
     if (!el) return;
     const formatted = newVal.toLocaleString();
-    if (el.textContent !== formatted) {
-      el.textContent = formatted;
-      bump(el);
-    }
+    if (el.textContent !== formatted) { el.textContent = formatted; bump(el); }
+  }
+  function escHtml(str) {
+    return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+  function dayFull(code) {
+    return {M:'Monday',T:'Tuesday',W:'Wednesday',Th:'Thursday',F:'Friday',Sa:'Saturday'}[code] ?? code;
+  }
+  function fmt12(t) {
+    if (!t) return '';
+    const [h, m] = t.split(':').map(Number);
+    return ((h % 12) || 12) + ':' + String(m).padStart(2,'0') + (h >= 12 ? ' PM' : ' AM');
+  }
+  function formatTimeRange(s, e) { return fmt12(s) + ' – ' + fmt12(e); }
+
+  // ── Today's schedule: client-side live status refresh ─────────────────────
+  // Runs every 30 seconds to flip row statuses without a server round-trip
+  function refreshTodayStatuses() {
+    const now = new Date();
+    const nowSec = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+
+    const rows = document.querySelectorAll('#today-tbody tr[data-start]');
+    let ongoing = 0, upcoming = 0, done = 0;
+
+    rows.forEach(row => {
+      const s = timeToSec(row.dataset.start);
+      const e = timeToSec(row.dataset.end);
+      let st;
+      if (nowSec >= s && nowSec < e)  st = 'ongoing';
+      else if (nowSec < s)            st = 'upcoming';
+      else                             st = 'done';
+
+      // Update row class
+      row.classList.remove('row-ongoing','row-done');
+      if (st === 'ongoing')  { row.classList.add('row-ongoing'); ongoing++; }
+      else if (st === 'done'){ row.classList.add('row-done');    done++; }
+      else                   { upcoming++; }
+
+      // Update badge in first cell
+      const badgeCell = row.cells[0];
+      if (!badgeCell) return;
+      let prog = 0;
+      if (st === 'ongoing') {
+        const dur = e - s;
+        prog = dur > 0 ? Math.min(100, Math.round((nowSec - s) / dur * 100)) : 0;
+      }
+
+      const badgeHtml = {
+        ongoing:  `<span class="status-badge st-ongoing"><span class="chip-dot"></span> Ongoing</span>
+                   <div class="time-progress"><div class="time-progress-fill" style="width:${prog}%"></div></div>`,
+        upcoming: `<span class="status-badge st-upcoming"><span class="chip-dot"></span> Upcoming</span>`,
+        done:     `<span class="status-badge st-done"><span class="chip-dot"></span> Done</span>`,
+      };
+      badgeCell.innerHTML = badgeHtml[st];
+
+      // Update room occupancy dot (5th cell, index 4)
+      const roomCell = row.cells[4];
+      if (roomCell) {
+        const occ = roomCell.querySelector('.room-occ');
+        if (occ) {
+          occ.className = 'room-occ ' + (st === 'ongoing' ? 'occupied' : 'free');
+        }
+      }
+    });
+
+    // Update header chips
+    const oc = document.getElementById('chip-ongoing-cnt');
+    const uc = document.getElementById('chip-upcoming-cnt');
+    const dc = document.getElementById('chip-done-cnt');
+    if (oc) oc.textContent = ongoing;
+    if (uc) uc.textContent = upcoming;
+    if (dc) dc.textContent = done;
   }
 
-  // Update day bars
+  function timeToSec(t) {
+    if (!t) return 0;
+    const [h, m] = t.split(':').map(Number);
+    return h * 3600 + m * 60;
+  }
+
+  // Refresh statuses every 30 seconds
+  refreshTodayStatuses();
+  setInterval(refreshTodayStatuses, 30000);
+
+  // ── SSE stat/chart updates ────────────────────────
   function updateDayChart(byDay) {
     const vals = Object.values(byDay);
     const maxD = vals.length ? Math.max(...vals, 1) : 1;
@@ -699,28 +1045,17 @@ $maxDay    = !empty($byDay) ? max($byDay) : 1;
       const pct  = Math.round((cnt / maxD) * 100);
       const fill = document.getElementById('day-fill-' + code);
       const countEl = document.getElementById('day-count-' + code);
-      if (fill) {
-        fill.style.width = Math.max(pct, 0) + '%';
-        fill.textContent = cnt > 0 ? cnt : '';
-      }
+      if (fill)    { fill.style.width = Math.max(pct, 0) + '%'; fill.textContent = cnt > 0 ? cnt : ''; }
       if (countEl) countEl.textContent = cnt;
     }
   }
 
-  // Update semester donut
   function updateSemester(sem1, sem2) {
     const total = sem1 + sem2;
     const dash1 = total > 0 ? (sem1 / total) * CIRC : 0;
     const dash2 = total > 0 ? (sem2 / total) * CIRC : CIRC;
-
     const arc1 = document.getElementById('sem-arc1');
     const arc2 = document.getElementById('sem-arc2');
-    const tot  = document.getElementById('sem-total');
-    const v1   = document.getElementById('sem1-val');
-    const v2   = document.getElementById('sem2-val');
-    const p1   = document.getElementById('sem1-pct');
-    const p2   = document.getElementById('sem2-pct');
-
     if (arc1) {
       arc1.style.display = sem1 === 0 ? 'none' : '';
       arc1.setAttribute('stroke-dasharray', dash1.toFixed(2) + ' ' + CIRC.toFixed(2));
@@ -730,46 +1065,36 @@ $maxDay    = !empty($byDay) ? max($byDay) : 1;
       arc2.style.display = sem2 === 0 ? 'none' : '';
       arc2.setAttribute('stroke-dasharray', dash2.toFixed(2) + ' ' + CIRC.toFixed(2));
     }
+    const tot = document.getElementById('sem-total');
     if (tot) tot.textContent = total;
-    if (v1)  v1.textContent  = sem1;
-    if (v2)  v2.textContent  = sem2;
-    if (p1)  p1.textContent  = total > 0 ? Math.round(sem1 / total * 100) + '%' : '0%';
-    if (p2)  p2.textContent  = total > 0 ? Math.round(sem2 / total * 100) + '%' : '0%';
+    const v1 = document.getElementById('sem1-val'); if (v1) v1.textContent = sem1;
+    const v2 = document.getElementById('sem2-val'); if (v2) v2.textContent = sem2;
+    const p1 = document.getElementById('sem1-pct'); if (p1) p1.textContent = total > 0 ? Math.round(sem1/total*100)+'%' : '0%';
+    const p2 = document.getElementById('sem2-pct'); if (p2) p2.textContent = total > 0 ? Math.round(sem2/total*100)+'%' : '0%';
   }
 
-  // Update professor panel
   function updateProfessors(d) {
     const totalP = d.counts.professors || 1;
     const unscheduled = d.counts.professors - d.scheduled;
-
     const ftBar = document.getElementById('ft-bar');
     const ptBar = document.getElementById('pt-bar');
     if (ftBar) ftBar.style.width = Math.round(d.fullTime / totalP * 100) + '%';
     if (ptBar) ptBar.style.width = Math.round(d.partTime / totalP * 100) + '%';
-
-    const ftC = document.getElementById('ft-count');
-    const ptC = document.getElementById('pt-count');
-    const sc  = document.getElementById('sched-count');
+    const ftC = document.getElementById('ft-count'); if (ftC) ftC.textContent = d.fullTime;
+    const ptC = document.getElementById('pt-count'); if (ptC) ptC.textContent = d.partTime;
+    const sc  = document.getElementById('sched-count'); if (sc) sc.textContent = d.scheduled;
     const uc  = document.getElementById('unsched-count');
-    if (ftC) ftC.textContent = d.fullTime;
-    if (ptC) ptC.textContent = d.partTime;
-    if (sc)  sc.textContent  = d.scheduled;
-    if (uc) {
-      uc.textContent = unscheduled;
-      uc.style.color = unscheduled > 0 ? '#ef4444' : '#10b981';
-    }
+    if (uc) { uc.textContent = unscheduled; uc.style.color = unscheduled > 0 ? '#ef4444' : '#10b981'; }
   }
 
-  // Rebuild rank list (busiest rooms or top professors)
   function rebuildRankList(containerId, items, barColor, subFn) {
     const list = document.getElementById(containerId);
     if (!list) return;
     if (!items.length) { list.innerHTML = ''; return; }
     const maxVal = Math.max(...items.map(i => i.cnt), 1);
-    const topClasses = ['top1','top2','top3'];
     list.innerHTML = items.map((item, i) => `
       <div class="rank-item">
-        <span class="rank-num ${topClasses[i] ?? ''}">${i + 1}</span>
+        <span class="rank-num ${['top1','top2','top3'][i] ?? ''}">${i + 1}</span>
         <div class="rank-info">
           <div class="rank-name">${escHtml(item.name)}</div>
           <div class="rank-sub">${subFn(item)}</div>
@@ -784,7 +1109,55 @@ $maxDay    = !empty($byDay) ? max($byDay) : 1;
     `).join('');
   }
 
-  // Rebuild recent schedules tbody
+  // Rebuild today's table from SSE data (preserves live status refresh)
+  function rebuildTodayTable(schedules) {
+    const tbody = document.getElementById('today-tbody');
+    if (!tbody || !schedules) return;
+
+    const now = new Date();
+    const nowSec = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+
+    tbody.innerHTML = schedules.map(r => {
+      const s = timeToSec(r.start_time), e = timeToSec(r.end_time);
+      let st;
+      if (nowSec >= s && nowSec < e)  st = 'ongoing';
+      else if (nowSec < s)            st = 'upcoming';
+      else                             st = 'done';
+
+      const rowCls = st === 'ongoing' ? 'row-ongoing' : st === 'done' ? 'row-done' : '';
+      const prog   = st === 'ongoing' && (e-s) > 0 ? Math.min(100, Math.round((nowSec-s)/(e-s)*100)) : 0;
+
+      const badgeHtml = {
+        ongoing:  `<span class="status-badge st-ongoing"><span class="chip-dot"></span> Ongoing</span>
+                   <div class="time-progress"><div class="time-progress-fill" style="width:${prog}%"></div></div>`,
+        upcoming: `<span class="status-badge st-upcoming"><span class="chip-dot"></span> Upcoming</span>`,
+        done:     `<span class="status-badge st-done"><span class="chip-dot"></span> Done</span>`,
+      }[st];
+
+      const semClass = r.semester === '1st Semester' ? 's1' : 's2';
+      const semLabel = r.semester === '1st Semester' ? '1st Sem' : '2nd Sem';
+      return `<tr class="${rowCls}" data-start="${escHtml(r.start_time)}" data-end="${escHtml(r.end_time)}">
+        <td>${badgeHtml}</td>
+        <td><span class="cell-section">${escHtml(r.section_name)}</span></td>
+        <td>
+          <span class="sub-chip">${escHtml(r.subject_code)}</span>
+          <div class="sub-name">${escHtml(r.subject_name)}</div>
+        </td>
+        <td><span class="time-mono">${formatTimeRange(r.start_time, r.end_time)}</span></td>
+        <td>
+          <div class="room-occ ${st === 'ongoing' ? 'occupied' : 'free'}">
+            <span class="room-occ-dot"></span>${escHtml(r.room_name)}
+          </div>
+          ${r.room_type ? `<div style="font-size:.7rem;color:#94a3b8;margin-top:2px">${escHtml(r.room_type)}</div>` : ''}
+        </td>
+        <td><span class="prof-name">${escHtml(r.prof_name)}</span></td>
+        <td><span class="sem-pill ${semClass}">${semLabel}</span></td>
+      </tr>`;
+    }).join('');
+  }
+
+  let prevScheduleIds = [];
+
   function rebuildRecentTable(schedules, prevIds) {
     const tbody = document.getElementById('recent-tbody');
     if (!tbody) return;
@@ -817,37 +1190,14 @@ $maxDay    = !empty($byDay) ? max($byDay) : 1;
     }).join('');
   }
 
-  // Helpers
-  function escHtml(str) {
-    return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-  }
-  function dayFull(code) {
-    const map = {M:'Monday',T:'Tuesday',W:'Wednesday',Th:'Thursday',F:'Friday',Sa:'Saturday'};
-    return map[code] ?? code;
-  }
-  function formatTimeRange(s, e) {
-    function fmt(t) {
-      if (!t) return '';
-      const [h, m] = t.split(':').map(Number);
-      const ampm = h >= 12 ? 'PM' : 'AM';
-      return ((h % 12) || 12) + ':' + String(m).padStart(2,'0') + ' ' + ampm;
-    }
-    return fmt(s) + ' – ' + fmt(e);
-  }
-
-  // Track prev schedule IDs to detect new rows
-  let prevScheduleIds = [];
-
-  // ── Main SSE listener ──
+  // ── SSE connection ───────────────────────────────
   function connect() {
     const label = document.getElementById('live-label');
     const badge = document.getElementById('live-badge');
-
     const es = new EventSource('dashboard-stream.php');
 
     es.onopen = () => {
       if (label) label.textContent = 'Live';
-      if (badge) badge.style.borderColor = '';
     };
 
     es.onmessage = (e) => {
@@ -855,26 +1205,28 @@ $maxDay    = !empty($byDay) ? max($byDay) : 1;
         const d = JSON.parse(e.data);
         flashBadge();
 
-        // Stat counters
         for (const key of ['courses','sections','subjects','professors','rooms','schedules']) {
           updateStat('stat-' + key, d.counts[key]);
         }
 
-        // Charts & panels
         updateDayChart(d.byDay);
         updateSemester(d.sem1, d.sem2);
         updateProfessors(d);
 
-        // Rank lists
         rebuildRankList('busy-rooms-list', d.busyRooms, '#ef4444', item => escHtml(item.room_type ?? ''));
         rebuildRankList('top-profs-list', d.topProfs, '#8b5cf6', item => {
           const ft = (item.employment_type ?? 'Full Time') === 'Full Time';
           return `<span style="color:${ft?'#10b981':'#f59e0b'}">${ft ? '🟢 Full Time' : '🟠 Part Time'}</span>`;
         });
 
-        // Recent schedules table
         rebuildRecentTable(d.recentSchedules, prevScheduleIds);
         prevScheduleIds = d.recentSchedules.map(r => r.id);
+
+        // Rebuild today's table if SSE sends it (add todaySchedules to dashboard-stream.php)
+        if (d.todaySchedules) {
+          rebuildTodayTable(d.todaySchedules);
+          refreshTodayStatuses();
+        }
 
       } catch (err) {
         console.error('Dashboard SSE parse error:', err);
@@ -884,7 +1236,6 @@ $maxDay    = !empty($byDay) ? max($byDay) : 1;
     es.onerror = () => {
       if (label) label.textContent = 'Reconnecting…';
       es.close();
-      // Reconnect after 6 seconds
       setTimeout(connect, 6000);
     };
   }
